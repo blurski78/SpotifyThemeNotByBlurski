@@ -378,10 +378,10 @@ const C = re({
   icon: { height: 16, width: 16, tintColor: se.INTERACTIVE_NORMAL }
 });
 
-// FIX: Target the UserProfile component directly instead
-const Se = window.enmity.modules.getByName("UserProfile", { default: false });
+// FIX: Target the correct profile component
 const be = f("ic_friend_wave_24px");
 
+// This component will be injected into the profile
 const ve = $.wrap(function({ userId: e }) {
   const n = ce([T], () => {
     const i = T.getSince(e);
@@ -389,56 +389,100 @@ const ve = $.wrap(function({ userId: e }) {
   });
   
   if (n) {
-    return o(d, null,
+    return o(d, {
+      style: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6
+      }
+    },
+      u.getBoolean("add-icon", !0) &&
+      o(A, { 
+        source: be, 
+        style: { 
+          height: 16, 
+          width: 16, 
+          tintColor: se.INTERACTIVE_NORMAL 
+        } 
+      }),
       o(c, {
         color: "header-secondary",
-        style: C.header,
-        variant: "text-sm/semibold"
-      }, "Friends Since"),
-      o(d, { style: C.text },
-        u.getBoolean("add-icon", !0) &&
-        o(A, { source: be, style: C.icon }),
-        o(c, null, n)
-      )
+        variant: "text-sm/normal"
+      }, `Friends since ${n}`)
     );
   }
   return null;
 });
 
-// FIXED onStart implementation
+// FIXED onStart - patches the UserProfileHeader component
 he({
   onStart() {
-    // Get the UserProfile component
-    const UserProfile = window.enmity.modules.getByName("UserProfile", { default: false });
+    // Try to get the UserProfileHeader component
+    let ProfileComponent = window.enmity.modules.getByName("UserProfileHeader", { default: false });
     
-    if (UserProfile) {
-      // Patch the UserProfile component
-      I.after(UserProfile, "default", (e, [{ userId }], i) => {
+    // If not found, try UserProfile
+    if (!ProfileComponent) {
+      ProfileComponent = window.enmity.modules.getByName("UserProfile", { default: false });
+    }
+    
+    // If still not found, try to find it by props
+    if (!ProfileComponent) {
+      const modules = window.enmity.modules.getAll();
+      for (const mod of modules) {
+        if (mod && mod.default && typeof mod.default === 'function') {
+          const name = mod.default.name || mod.default.displayName;
+          if (name && (name.includes("UserProfile") || name.includes("Profile"))) {
+            ProfileComponent = mod;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (ProfileComponent) {
+      // Patch the component
+      I.after(ProfileComponent, "default", (e, props, i) => {
+        const { userId } = props[0] || {};
+        if (!userId) return;
+        
+        // Check if we're friends with this user
+        if (!T.isFriend(userId)) return;
+        
         const children = i.props.children;
         
-        // If children is an array, insert our component
+        // Handle different children structures
         if (Array.isArray(children)) {
-          // Insert at position 2 (after the header section)
-          children.splice(2, 0, o(ve, { userId }));
+          // Check if our component is already added
+          const alreadyAdded = children.some(child => 
+            te(child) && child.type && child.type.name === "FriendsSince"
+          );
+          if (!alreadyAdded) {
+            // Insert after the header (position 1)
+            children.splice(1, 0, o(ve, { userId, key: "friends-since" }));
+          }
         } else if (children) {
-          // If children is not an array, wrap it
+          // Wrap single child
           i.props.children = [
             children,
-            o(ve, { userId })
+            o(ve, { userId, key: "friends-since" })
           ];
         }
       });
     } else {
-      // Fallback: Try to patch the profile card directly
-      const ProfileCard = window.enmity.modules.getByName("UserProfileHeader", { default: false });
-      if (ProfileCard) {
-        I.after(ProfileCard, "default", (e, [{ userId }], i) => {
-          // Add to the end of the component
-          const existingChildren = i.props.children;
-          i.props.children = o(d, null,
-            existingChildren,
-            o(ve, { userId })
-          );
+      // Fallback: Try patching the ProfileStore render
+      const ProfileRenderer = window.enmity.modules.getByName("ProfileRenderer", { default: false });
+      if (ProfileRenderer) {
+        I.after(ProfileRenderer, "default", (e, props, i) => {
+          const { userId } = props[0] || {};
+          if (!userId || !T.isFriend(userId)) return;
+          
+          // Add our component to the render
+          const children = i.props.children;
+          if (Array.isArray(children)) {
+            children.push(o(ve, { userId, key: "friends-since" }));
+          }
         });
       }
     }
